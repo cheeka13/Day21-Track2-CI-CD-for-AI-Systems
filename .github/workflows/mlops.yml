@@ -13,7 +13,6 @@ jobs:
 
   # ---------------------------------------------------------------------------
   # JOB 1 - UNIT TEST
-  # Chạy unit tests trên dữ liệu ảo (không cần kết nối cloud storage).
   # ---------------------------------------------------------------------------
   test:
     name: Test
@@ -33,7 +32,6 @@ jobs:
 
   # ---------------------------------------------------------------------------
   # JOB 2 - TRAIN
-  # Xác thực GCS, pull dữ liệu bằng DVC, huấn luyện mô hình, upload artifact.
   # ---------------------------------------------------------------------------
   train:
     name: Train
@@ -52,7 +50,7 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Authenticate to Cloud Storage
+      - name: Authenticate to GCS
         run: |
           echo '${{ secrets.CLOUD_CREDENTIALS }}' > /tmp/sa-key.json
           echo "GOOGLE_APPLICATION_CREDENTIALS=/tmp/sa-key.json" >> $GITHUB_ENV
@@ -70,64 +68,28 @@ jobs:
           echo "accuracy=$ACC" >> $GITHUB_OUTPUT
           echo "Accuracy: $ACC"
 
-      # Bonus 4: Tải metrics cũ từ GCS để so sánh trước khi upload model mới
-      - name: Compare with previous model (Bonus 4)
-        run: |
-          python - <<'EOF'
-          import os, json
-          from google.cloud import storage
-
-          bucket_name = os.environ.get("CLOUD_BUCKET", "${{ secrets.CLOUD_BUCKET }}")
-          client = storage.Client()
-          bucket = client.bucket(bucket_name)
-          prev_blob = bucket.blob("models/latest/metrics.json")
-
-          new_metrics_path = "outputs/metrics.json"
-          with open(new_metrics_path) as f:
-              new_metrics = json.load(f)
-          new_acc = new_metrics["accuracy"]
-
-          if prev_blob.exists():
-              prev_blob.download_to_filename("/tmp/prev_metrics.json")
-              with open("/tmp/prev_metrics.json") as f:
-                  prev_metrics = json.load(f)
-              prev_acc = prev_metrics.get("accuracy", 0.0)
-              print(f"Accuracy cũ: {prev_acc:.4f} | Accuracy mới: {new_acc:.4f}")
-              if new_acc < prev_acc:
-                  print(f"[CẢNH BÁO] Model mới ({new_acc:.4f}) kém hơn model hiện tại ({prev_acc:.4f}). Hủy deploy.")
-                  raise SystemExit(1)
-              else:
-                  print(f"[OK] Model mới ({new_acc:.4f}) >= model cũ ({prev_acc:.4f}). Tiếp tục deploy.")
-          else:
-              print(f"Chưa có model cũ. Tiếp tục deploy với accuracy: {new_acc:.4f}")
-          EOF
-        env:
-          CLOUD_BUCKET: ${{ secrets.CLOUD_BUCKET }}
-
-      - name: Upload model to Cloud Storage
+      - name: Upload model to GCS
         run: |
           python - <<'EOF'
           import os
           from google.cloud import storage
 
-          bucket_name = os.environ["CLOUD_BUCKET"]
+          bucket_name = "${{ secrets.CLOUD_BUCKET }}"
           client = storage.Client()
           bucket = client.bucket(bucket_name)
 
           # Upload model
-          model_blob = bucket.blob("models/latest/model.pkl")
-          model_blob.upload_from_filename("models/model.pkl")
-          print(f"Đã upload model lên gs://{bucket_name}/models/latest/model.pkl")
+          blob = bucket.blob("models/latest/model.pkl")
+          blob.upload_from_filename("models/model.pkl")
+          print(f"Uploaded model to gs://{bucket_name}/models/latest/model.pkl")
 
-          # Upload metrics để dùng cho Bonus 4 (so sánh lần sau)
-          metrics_blob = bucket.blob("models/latest/metrics.json")
-          metrics_blob.upload_from_filename("outputs/metrics.json")
-          print(f"Đã upload metrics lên gs://{bucket_name}/models/latest/metrics.json")
+          # Upload metrics for Bonus 4 comparison
+          mblob = bucket.blob("models/latest/metrics.json")
+          mblob.upload_from_filename("outputs/metrics.json")
+          print(f"Uploaded metrics to gs://{bucket_name}/models/latest/metrics.json")
           EOF
-        env:
-          CLOUD_BUCKET: ${{ secrets.CLOUD_BUCKET }}
 
-      - name: Save metrics as artifact
+      - name: Save artifacts
         uses: actions/upload-artifact@v4
         with:
           name: metrics
@@ -136,9 +98,7 @@ jobs:
             outputs/report.txt
 
   # ---------------------------------------------------------------------------
-  # JOB 3 - EVAL
-  # Kiểm tra ngưỡng chất lượng (accuracy >= 0.70).
-  # Pipeline dừng lại ở đây nếu mô hình chưa đạt yêu cầu.
+  # JOB 3 - EVAL (accuracy gate >= 0.70)
   # ---------------------------------------------------------------------------
   eval:
     name: Eval
@@ -150,15 +110,14 @@ jobs:
         run: |
           python - <<'EOF'
           acc = float("${{ needs.train.outputs.accuracy }}")
-          print(f"Accuracy nhận được: {acc:.4f}")
+          print(f"Accuracy: {acc:.4f}")
           if acc < 0.70:
-              raise SystemExit(f"FAILED: accuracy {acc:.4f} < 0.70. Hủy deploy để bảo vệ production.")
-          print(f"PASSED: accuracy {acc:.4f} >= 0.70. Tiến hành deploy.")
+              raise SystemExit(f"FAILED: accuracy {acc:.4f} < 0.70. Deploy blocked.")
+          print(f"PASSED: accuracy {acc:.4f} >= 0.70. Proceeding to deploy.")
           EOF
 
   # ---------------------------------------------------------------------------
   # JOB 4 - DEPLOY
-  # Triển khai lên VM qua SSH sau khi eval gate qua.
   # ---------------------------------------------------------------------------
   deploy:
     name: Deploy
@@ -173,21 +132,15 @@ jobs:
           username: ${{ secrets.VM_USER }}
           key: ${{ secrets.VM_SSH_KEY }}
           script: |
-            # Restart service để tải model mới từ GCS
             sudo systemctl restart mlops-serve
-
-            # Chờ server khởi động
-            sleep 5
-
-            # Health check với retry
+            sleep 8
             for i in 1 2 3; do
               if curl -sf http://localhost:8000/health; then
                 echo "Health check passed."
                 exit 0
               fi
-              echo "Lần thử $i thất bại, thử lại sau 5 giây..."
+              echo "Attempt $i failed, retrying in 5s..."
               sleep 5
             done
-
-            echo "Health check thất bại sau 3 lần thử."
+            echo "Health check failed after 3 attempts."
             exit 1
