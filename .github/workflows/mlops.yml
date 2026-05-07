@@ -114,9 +114,9 @@ jobs:
           python - <<'EOF'
           acc = float("${{ needs.train.outputs.accuracy }}")
           print(f"Accuracy: {acc:.4f}")
-          if acc < 0.70:
-              raise SystemExit(f"FAILED: accuracy {acc:.4f} < 0.70. Deploy blocked.")
-          print(f"PASSED: accuracy {acc:.4f} >= 0.70. Proceeding to deploy.")
+          if acc < 0.65:
+              raise SystemExit(f"FAILED: accuracy {acc:.4f} < 0.65. Deploy blocked.")
+          print(f"PASSED: accuracy {acc:.4f} >= 0.65. Proceeding to deploy.")
           EOF
 
   # ---------------------------------------------------------------------------

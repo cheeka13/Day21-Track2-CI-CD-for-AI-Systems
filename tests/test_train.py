@@ -6,8 +6,8 @@ from src.train import train
 
 
 FEATURE_NAMES = [
-    "fixed_acidity", "volatile_acidity", "citric_acid", "residual_sugar",
-    "chlorides", "free_sulfur_dioxide", "total_sulfur_dioxide", "density",
+    "fixed acidity", "volatile acidity", "citric acid", "residual sugar",
+    "chlorides", "free sulfur dioxide", "total sulfur dioxide", "density",
     "pH", "sulphates", "alcohol", "wine_type",
 ]
 

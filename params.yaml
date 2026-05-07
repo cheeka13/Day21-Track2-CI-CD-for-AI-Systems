@@ -1,4 +1,4 @@
-model_type: random_forest
-n_estimators: 200
-max_depth: 10
+model_type: gradient_boosting
+n_estimators: 300
+max_depth: 5
 min_samples_split: 2

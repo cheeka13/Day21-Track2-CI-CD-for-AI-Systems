@@ -5,7 +5,7 @@ import yaml
 import json
 import joblib
 import os
-from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier, HistGradientBoostingClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import (
     accuracy_score,
@@ -50,9 +50,13 @@ def _build_model(params: dict):
     rf_params = {k: v for k, v in params.items() if k != "model_type"}
 
     if model_type == "gradient_boosting":
-        allowed = {"n_estimators", "max_depth", "min_samples_split"}
+        allowed = {"n_estimators", "max_depth", "min_samples_split", "learning_rate", "subsample"}
         gb_params = {k: v for k, v in rf_params.items() if k in allowed}
         return GradientBoostingClassifier(**gb_params, random_state=42)
+    elif model_type == "hist_gradient_boosting":
+        allowed = {"max_iter", "max_depth", "learning_rate", "min_samples_leaf"}
+        hgb_params = {k: v for k, v in rf_params.items() if k in allowed}
+        return HistGradientBoostingClassifier(**hgb_params, random_state=42)
     elif model_type == "logistic_regression":
         return LogisticRegression(max_iter=1000, random_state=42)
     else:
@@ -82,9 +86,9 @@ def train(
     df_eval = pd.read_csv(eval_path)
 
     # 2. Tách đặc trưng và nhãn
-    X_train = df_train.drop(columns=["target"])
+    X_train = df_train.drop(columns=["target"]).copy()
     y_train = df_train["target"]
-    X_eval = df_eval.drop(columns=["target"])
+    X_eval = df_eval.drop(columns=["target"]).copy()
     y_eval = df_eval["target"]
 
     # Bonus 5: Kiểm tra phân phối nhãn trước khi huấn luyện
