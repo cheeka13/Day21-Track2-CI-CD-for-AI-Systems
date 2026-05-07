@@ -71,6 +71,34 @@ jobs:
           echo "accuracy=$ACC" >> $GITHUB_OUTPUT
           echo "Accuracy: $ACC"
 
+      - name: Compare with previous model (Bonus 4)
+        run: |
+          python - <<'EOF'
+          import os, json
+          from google.cloud import storage
+
+          bucket_name = "${{ secrets.CLOUD_BUCKET }}"
+          client = storage.Client()
+          bucket = client.bucket(bucket_name)
+          prev_blob = bucket.blob("models/latest/metrics.json")
+
+          with open("outputs/metrics.json") as f:
+              new_metrics = json.load(f)
+          new_acc = new_metrics["accuracy"]
+
+          if prev_blob.exists():
+              prev_blob.download_to_filename("/tmp/prev_metrics.json")
+              with open("/tmp/prev_metrics.json") as f:
+                  prev_metrics = json.load(f)
+              prev_acc = prev_metrics.get("accuracy", 0.0)
+              print(f"Accuracy cu: {prev_acc:.4f} | Accuracy moi: {new_acc:.4f}")
+              if new_acc < prev_acc:
+                  raise SystemExit(f"FAILED: Model moi ({new_acc:.4f}) kem hon model cu ({prev_acc:.4f}). Huy deploy.")
+              print(f"OK: Model moi ({new_acc:.4f}) >= model cu ({prev_acc:.4f}). Tiep tuc deploy.")
+          else:
+              print(f"Chua co model cu. Deploy voi accuracy: {new_acc:.4f}")
+          EOF
+
       - name: Upload model to GCS
         run: |
           python - <<'EOF'
